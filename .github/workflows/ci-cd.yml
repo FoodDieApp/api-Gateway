@@ -55,39 +55,29 @@ jobs:
 
       # PUSH COMPLETE LOGS TO GRAFANA CLOUD LOKI
 
-      - name: Push Logs to Grafana Loki
+      - name: Send Logs to Grafana Cloud
         if: always()
-
-        env:
-          LOKI_URL: ${{ secrets.GRAFANA_LOKI_URL }}
-          LOKI_USERNAME: ${{ secrets.GRAFANA_USERNAME }}
-          LOKI_API_KEY: ${{ secrets.GRAFANA_API_KEY }}
-
         run: |
-          LOG_CONTENT=$(cat pipeline.log | sed 's/"/\\"/g')
+          # Limit log size (IMPORTANT)
+          LOG_CONTENT=$(tail -n 200 build.log | sed ':a;N;$!ba;s/\n/\\n/g' | sed 's/"/\\"/g')
 
-          cat <<EOF > loki-payload.json
-          {
-            "streams": [
-              {
-                "stream": {
-                  "service": "user-service",
-                  "pipeline": "github-actions",
-                  "repository": "${{ github.repository }}"
-                },
-                "values": [
-                  [
-                    "$(date +%s%N)",
-                    "$LOG_CONTENT"
-                  ]
-                ]
-              }
-            ]
-          }
-          EOF
+          TIMESTAMP=$(date +%s%N)
 
-          curl -u "$LOKI_USERNAME:$LOKI_API_KEY" \
+          curl -v -u "${{ secrets.GRAFANA_USER }}:${{ secrets.GRAFANA_API_KEY }}" \
+            -X POST "${{ secrets.GRAFANA_URL }}" \
             -H "Content-Type: application/json" \
-            -X POST \
-            "$LOKI_URL" \
-            --data-binary @loki-payload.json
+            --data-raw "{
+              \"streams\": [
+                {
+                  \"stream\": {
+                    \"job\": \"github-actions-api_GateWay\",
+                    \"repo\": \"${{ github.repository }}\",
+                    \"branch\": \"${{ github.ref_name }}\",
+                    \"status\": \"${{ job.status }}\"
+                  },
+                  \"values\": [
+                    [\"$TIMESTAMP\", \"$LOG_CONTENT\"]
+                  ]
+                }
+              ]
+            }"
