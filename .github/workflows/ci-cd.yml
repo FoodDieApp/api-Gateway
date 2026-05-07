@@ -114,7 +114,7 @@ jobs:
           echo "===== Sending Logs ====="
 
           curl -v \
-            -u "${{ secrets.GRAFANA_USER }}:${{ secrets.GRAFANA_API_KEY }}" \
+            -u "${{ secrets.GRAFANA_USERNAME }}:${{ secrets.GRAFANA_API_KEY }}" \
             -H "Content-Type: application/json" \
-            -X POST "${{ secrets.GRAFANA_URL }}" \
+            -X POST "${{ secrets.GRAFANA_LOKI_URL }}" \
             --data-binary @payload.json
