@@ -15,7 +15,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # TIMER
+      # START TIMER
 
       - name: Start Timer
         run: echo "START_TIME=$(date +%s)" >> $GITHUB_ENV
@@ -32,56 +32,36 @@ jobs:
         with:
           node-version: 20
 
-      # INSTALL DEPENDENCIES
+      # INSTALL
 
       - name: Install Dependencies
         run: |
           echo "Installing dependencies..." | tee -a pipeline.log
-
           npm install 2>&1 | tee -a pipeline.log
 
-      # RUN TESTS
+      # TESTS
 
       - name: Run Tests
         run: |
           echo "Running tests..." | tee -a pipeline.log
-
           npm test 2>&1 | tee -a pipeline.log
 
-      # BUILD DOCKER IMAGE
+      # BUILD IMAGE
 
       - name: Build Docker Image
         run: |
           echo "Building Docker image..." | tee -a pipeline.log
-
           docker build -t user-service . 2>&1 | tee -a pipeline.log
 
-      # DEPLOY CONTAINER
+      # PUSH COMPLETE LOGS TO GRAFANA CLOUD LOKI
 
-      - name: Deploy Container
-        run: |
-          echo "Deploying container..." | tee -a pipeline.log
-
-          docker run -d -p 5001:5001 user-service 2>&1 | tee -a pipeline.log
-
-      # PIPELINE SUCCESS
-
-      - name: Pipeline Success Log
-        if: success()
-        run: |
-          echo "Pipeline completed successfully" | tee -a pipeline.log
-
-      # PIPELINE FAILURE
-
-      - name: Pipeline Failure Log
-        if: failure()
-        run: |
-          echo "Pipeline failed" | tee -a pipeline.log
-
-      # PUSH FULL LOG FILE TO LOKI
-
-      - name: Push Logs to Loki
+      - name: Push Logs to Grafana Loki
         if: always()
+
+        env:
+          LOKI_URL: ${{ secrets.GRAFANA_LOKI_URL }}
+          LOKI_USERNAME: ${{ secrets.GRAFANA_USERNAME }}
+          LOKI_API_KEY: ${{ secrets.GRAFANA_API_KEY }}
 
         run: |
           LOG_CONTENT=$(cat pipeline.log | sed 's/"/\\"/g')
@@ -92,7 +72,8 @@ jobs:
               {
                 "stream": {
                   "service": "user-service",
-                  "pipeline": "github-actions"
+                  "pipeline": "github-actions",
+                  "repository": "${{ github.repository }}"
                 },
                 "values": [
                   [
@@ -105,39 +86,8 @@ jobs:
           }
           EOF
 
-          curl -X POST \
+          curl -u "$LOKI_USERNAME:$LOKI_API_KEY" \
             -H "Content-Type: application/json" \
-            http://YOUR_MONITORING_SERVER:3100/loki/api/v1/push \
+            -X POST \
+            "$LOKI_URL" \
             --data-binary @loki-payload.json
-
-      # PUSH METRICS
-
-      - name: Push Metrics
-        if: always()
-
-        run: |
-          END=$(date +%s)
-
-          DURATION=$((END - START_TIME))
-
-          echo "ci_pipeline_duration_seconds $DURATION" \
-          | curl --data-binary @- \
-          http://YOUR_MONITORING_SERVER:9091/metrics/job/user-service
-
-      # PUSH STATUS METRIC
-
-      - name: Push Pipeline Status
-        if: success()
-
-        run: |
-          echo "ci_pipeline_status 1" \
-          | curl --data-binary @- \
-          http://YOUR_MONITORING_SERVER:9091/metrics/job/user-service
-
-      - name: Push Failure Status
-        if: failure()
-
-        run: |
-          echo "ci_pipeline_status 0" \
-          | curl --data-binary @- \
-          http://YOUR_MONITORING_SERVER:9091/metrics/job/user-service
