@@ -1,0 +1,143 @@
+name: User Service CI/CD
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-test-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # CHECKOUT
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # TIMER
+
+      - name: Start Timer
+        run: echo "START_TIME=$(date +%s)" >> $GITHUB_ENV
+
+      # CREATE LOG FILE
+
+      - name: Create Log File
+        run: touch pipeline.log
+
+      # SETUP NODE
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # INSTALL DEPENDENCIES
+
+      - name: Install Dependencies
+        run: |
+          echo "Installing dependencies..." | tee -a pipeline.log
+
+          npm install 2>&1 | tee -a pipeline.log
+
+      # RUN TESTS
+
+      - name: Run Tests
+        run: |
+          echo "Running tests..." | tee -a pipeline.log
+
+          npm test 2>&1 | tee -a pipeline.log
+
+      # BUILD DOCKER IMAGE
+
+      - name: Build Docker Image
+        run: |
+          echo "Building Docker image..." | tee -a pipeline.log
+
+          docker build -t user-service . 2>&1 | tee -a pipeline.log
+
+      # DEPLOY CONTAINER
+
+      - name: Deploy Container
+        run: |
+          echo "Deploying container..." | tee -a pipeline.log
+
+          docker run -d -p 5001:5001 user-service 2>&1 | tee -a pipeline.log
+
+      # PIPELINE SUCCESS
+
+      - name: Pipeline Success Log
+        if: success()
+        run: |
+          echo "Pipeline completed successfully" | tee -a pipeline.log
+
+      # PIPELINE FAILURE
+
+      - name: Pipeline Failure Log
+        if: failure()
+        run: |
+          echo "Pipeline failed" | tee -a pipeline.log
+
+      # PUSH FULL LOG FILE TO LOKI
+
+      - name: Push Logs to Loki
+        if: always()
+
+        run: |
+          LOG_CONTENT=$(cat pipeline.log | sed 's/"/\\"/g')
+
+          cat <<EOF > loki-payload.json
+          {
+            "streams": [
+              {
+                "stream": {
+                  "service": "user-service",
+                  "pipeline": "github-actions"
+                },
+                "values": [
+                  [
+                    "$(date +%s%N)",
+                    "$LOG_CONTENT"
+                  ]
+                ]
+              }
+            ]
+          }
+          EOF
+
+          curl -X POST \
+            -H "Content-Type: application/json" \
+            http://YOUR_MONITORING_SERVER:3100/loki/api/v1/push \
+            --data-binary @loki-payload.json
+
+      # PUSH METRICS
+
+      - name: Push Metrics
+        if: always()
+
+        run: |
+          END=$(date +%s)
+
+          DURATION=$((END - START_TIME))
+
+          echo "ci_pipeline_duration_seconds $DURATION" \
+          | curl --data-binary @- \
+          http://YOUR_MONITORING_SERVER:9091/metrics/job/user-service
+
+      # PUSH STATUS METRIC
+
+      - name: Push Pipeline Status
+        if: success()
+
+        run: |
+          echo "ci_pipeline_status 1" \
+          | curl --data-binary @- \
+          http://YOUR_MONITORING_SERVER:9091/metrics/job/user-service
+
+      - name: Push Failure Status
+        if: failure()
+
+        run: |
+          echo "ci_pipeline_status 0" \
+          | curl --data-binary @- \
+          http://YOUR_MONITORING_SERVER:9091/metrics/job/user-service
