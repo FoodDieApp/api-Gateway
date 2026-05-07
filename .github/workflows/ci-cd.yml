@@ -10,74 +10,111 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # CHECKOUT
+      # 1. Checkout Repository
 
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # START TIMER
+      # 2. Start Timer
 
       - name: Start Timer
         run: echo "START_TIME=$(date +%s)" >> $GITHUB_ENV
 
-      # CREATE LOG FILE
+      # 3. Create Log File
 
       - name: Create Log File
         run: touch pipeline.log
 
-      # SETUP NODE
+      # 4. Setup Node.js
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      # INSTALL
+      # 5. Install Dependencies
 
       - name: Install Dependencies
         run: |
-          echo "Installing dependencies..." | tee -a pipeline.log
+          echo "===== Installing Dependencies =====" | tee -a pipeline.log
           npm install 2>&1 | tee -a pipeline.log
 
-      # TESTS
+      # 6. Run Tests
 
       - name: Run Tests
         run: |
-          echo "Running tests..." | tee -a pipeline.log
+          echo "===== Running Tests =====" | tee -a pipeline.log
           npm test 2>&1 | tee -a pipeline.log
 
-      # BUILD IMAGE
+      # 7. Login to Docker Hub
+
+      - name: Login to Docker Hub
+        run: |
+          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login \
+          -u "${{ secrets.DOCKER_USERNAME }}" \
+          --password-stdin 2>&1 | tee -a pipeline.log
+
+      # 8. Build Docker Image
 
       - name: Build Docker Image
         run: |
-          echo "Building Docker image..." | tee -a pipeline.log
-          docker build -t user-service . 2>&1 | tee -a pipeline.log
+          echo "===== Building Docker Image =====" | tee -a pipeline.log
 
-      # PUSH COMPLETE LOGS TO GRAFANA CLOUD LOKI
+          docker build \
+            -t hari8209/user-service:latest . \
+            2>&1 | tee -a pipeline.log
+
+      # 9. Push Docker Image
+
+      - name: Push Docker Image
+        run: |
+          echo "===== Pushing Docker Image =====" | tee -a pipeline.log
+
+          docker push hari8209/user-service:latest \
+            2>&1 | tee -a pipeline.log
+
+      # 10. Send Logs to Grafana Cloud Loki
 
       - name: Send Logs to Grafana Cloud
         if: always()
+
         run: |
-          # Limit log size (IMPORTANT)
-          LOG_CONTENT=$(tail -n 200 build.log | sed ':a;N;$!ba;s/\n/\\n/g' | sed 's/"/\\"/g')
+          echo "===== Sending Logs to Grafana Loki ====="
+
+          # Capture last 200 lines
+          LOG_CONTENT=$(tail -n 200 pipeline.log | jq -Rs .)
 
           TIMESTAMP=$(date +%s%N)
 
-          curl -v -u "${{ secrets.GRAFANA_USER }}:${{ secrets.GRAFANA_API_KEY }}" \
-            -X POST "${{ secrets.GRAFANA_URL }}" \
-            -H "Content-Type: application/json" \
-            --data-raw "{
-              \"streams\": [
-                {
-                  \"stream\": {
-                    \"job\": \"github-actions-api_GateWay\",
-                    \"repo\": \"${{ github.repository }}\",
-                    \"branch\": \"${{ github.ref_name }}\",
-                    \"status\": \"${{ job.status }}\"
-                  },
-                  \"values\": [
-                    [\"$TIMESTAMP\", \"$LOG_CONTENT\"]
+          cat <<EOF > payload.json
+          {
+            "streams": [
+              {
+                "stream": {
+                  "job": "github-actions-user-service",
+                  "service": "user-service",
+                  "repo": "${{ github.repository }}",
+                  "branch": "${{ github.ref_name }}",
+                  "status": "${{ job.status }}"
+                },
+                "values": [
+                  [
+                    "$TIMESTAMP",
+                    $LOG_CONTENT
                   ]
-                }
-              ]
-            }"
+                ]
+              }
+            ]
+          }
+          EOF
+
+          echo "===== Loki Payload ====="
+          cat payload.json
+
+          echo "===== Sending Logs ====="
+
+          curl -v \
+            -u "${{ secrets.GRAFANA_USER }}:${{ secrets.GRAFANA_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -X POST "${{ secrets.GRAFANA_URL }}" \
+            --data-binary @payload.json
