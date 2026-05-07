@@ -44,15 +44,22 @@ jobs:
       - name: Run Tests
         run: |
           echo "===== Running Tests =====" | tee -a pipeline.log
-          npm test 2>&1 | tee -a pipeline.log
 
-      # 7. Login to Docker Hub
+          if npm run | grep -q "test"; then
+            npm test 2>&1 | tee -a pipeline.log
+          else
+            echo "No test script found in package.json" | tee -a pipeline.log
+          fi
 
-      - name: Login to Docker Hub
+      # 7. Login Docker Hub
+
+      - name: Login Docker Hub
         run: |
+          echo "===== Docker Login =====" | tee -a pipeline.log
+
           echo "${{ secrets.DOCKER_PASSWORD }}" | docker login \
-          -u "${{ secrets.DOCKER_USERNAME }}" \
-          --password-stdin 2>&1 | tee -a pipeline.log
+            -u "${{ secrets.DOCKER_USERNAME }}" \
+            --password-stdin 2>&1 | tee -a pipeline.log
 
       # 8. Build Docker Image
 
@@ -77,27 +84,44 @@ jobs:
 
       - name: Send Logs to Grafana Cloud
         if: always()
+
         run: |
-          # Limit log size (IMPORTANT)
-          LOG_CONTENT=$(tail -n 200 build.log | sed ':a;N;$!ba;s/\n/\\n/g' | sed 's/"/\\"/g')
+          echo "===== Sending Logs to Grafana Loki ====="
+
+          # Capture last 200 log lines safely
+          LOG_CONTENT=$(tail -n 200 pipeline.log | jq -Rs .)
 
           TIMESTAMP=$(date +%s%N)
 
-          curl -v -u "${{ secrets.GRAFANA_USERNAME }}:${{ secrets.GRAFANA_API_KEY }}" \
-            -X POST "${{ secrets.GRAFANA_LOKI_URL }}" \
-            -H "Content-Type: application/json" \
-            --data-raw "{
-              \"streams\": [
-                {
-                  \"stream\": {
-                    \"job\": \"api-Gatway\",
-                    \"repo\": \"${{ github.repository }}\",
-                    \"branch\": \"${{ github.ref_name }}\",
-                    \"status\": \"${{ job.status }}\"
-                  },
-                  \"values\": [
-                    [\"$TIMESTAMP\", \"$LOG_CONTENT\"]
+          cat <<EOF > payload.json
+          {
+            "streams": [
+              {
+                "stream": {
+                  "job": "github-actions",
+                  "service": "user-service",
+                  "repo": "${{ github.repository }}",
+                  "branch": "${{ github.ref_name }}",
+                  "status": "${{ job.status }}"
+                },
+                "values": [
+                  [
+                    "$TIMESTAMP",
+                    $LOG_CONTENT
                   ]
-                }
-              ]
-            }"
+                ]
+              }
+            ]
+          }
+          EOF
+
+          echo "===== Loki Payload ====="
+          cat payload.json
+
+          echo "===== Sending Logs ====="
+
+          curl -v \
+            -u "${{ secrets.GRAFANA_USERNAME }}:${{ secrets.GRAFANA_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -X POST "${{ secrets.GRAFANA_LOKI_URL }}" \
+            --data-binary @payload.json
