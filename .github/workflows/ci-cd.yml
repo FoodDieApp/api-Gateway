@@ -77,44 +77,27 @@ jobs:
 
       - name: Send Logs to Grafana Cloud
         if: always()
-
         run: |
-          echo "===== Sending Logs to Grafana Loki ====="
-
-          # Capture last 200 lines
-          LOG_CONTENT=$(tail -n 200 pipeline.log | jq -Rs .)
+          # Limit log size (IMPORTANT)
+          LOG_CONTENT=$(tail -n 200 build.log | sed ':a;N;$!ba;s/\n/\\n/g' | sed 's/"/\\"/g')
 
           TIMESTAMP=$(date +%s%N)
 
-          cat <<EOF > payload.json
-          {
-            "streams": [
-              {
-                "stream": {
-                  "job": "github-actions-user-service",
-                  "service": "user-service",
-                  "repo": "${{ github.repository }}",
-                  "branch": "${{ github.ref_name }}",
-                  "status": "${{ job.status }}"
-                },
-                "values": [
-                  [
-                    "$TIMESTAMP",
-                    $LOG_CONTENT
-                  ]
-                ]
-              }
-            ]
-          }
-          EOF
-
-          echo "===== Loki Payload ====="
-          cat payload.json
-
-          echo "===== Sending Logs ====="
-
-          curl -v \
-            -u "${{ secrets.GRAFANA_USERNAME }}:${{ secrets.GRAFANA_API_KEY }}" \
-            -H "Content-Type: application/json" \
+          curl -v -u "${{ secrets.GRAFANA_USERNAME }}:${{ secrets.GRAFANA_API_KEY }}" \
             -X POST "${{ secrets.GRAFANA_LOKI_URL }}" \
-            --data-binary @payload.json
+            -H "Content-Type: application/json" \
+            --data-raw "{
+              \"streams\": [
+                {
+                  \"stream\": {
+                    \"job\": \"api-Gatway\",
+                    \"repo\": \"${{ github.repository }}\",
+                    \"branch\": \"${{ github.ref_name }}\",
+                    \"status\": \"${{ job.status }}\"
+                  },
+                  \"values\": [
+                    [\"$TIMESTAMP\", \"$LOG_CONTENT\"]
+                  ]
+                }
+              ]
+            }"
