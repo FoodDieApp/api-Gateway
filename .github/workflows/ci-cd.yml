@@ -1,4 +1,4 @@
-name: User Service CI/CD
+name: API Gateway Service CI/CD
 
 on:
   push:
@@ -51,9 +51,9 @@ jobs:
             echo "No test script found in package.json" | tee -a pipeline.log
           fi
 
-      # 7. Login Docker Hub
+      # 7. Login to Docker Hub
 
-      - name: Login Docker Hub
+      - name: Login to Docker Hub
         run: |
           echo "===== Docker Login =====" | tee -a pipeline.log
 
@@ -68,7 +68,7 @@ jobs:
           echo "===== Building Docker Image =====" | tee -a pipeline.log
 
           docker build \
-            -t hari8209/user-service:latest . \
+            -t hari8209/api-gateway-service:latest . \
             2>&1 | tee -a pipeline.log
 
       # 9. Push Docker Image
@@ -77,7 +77,7 @@ jobs:
         run: |
           echo "===== Pushing Docker Image =====" | tee -a pipeline.log
 
-          docker push hari8209/user-service:latest \
+          docker push hari8209/api-gateway-service:latest \
             2>&1 | tee -a pipeline.log
 
       # 10. Send Logs to Grafana Cloud Loki
@@ -99,8 +99,8 @@ jobs:
               {
                 "stream": {
                   "job": "github-actions",
-                  "service": "user-service",
-                  "repo": "${{ github.repository }}",
+                  "service": "api-gateway-service",
+                  "repository": "${{ github.repository }}",
                   "branch": "${{ github.ref_name }}",
                   "status": "${{ job.status }}"
                 },
