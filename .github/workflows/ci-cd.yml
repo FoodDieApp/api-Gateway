@@ -43,13 +43,9 @@ jobs:
 
       - name: Run Tests
         run: |
-          echo "===== Running Tests =====" | tee -a pipeline.log
+          echo "Simulating test failure..." | tee -a pipeline.log
 
-          if npm run | grep -q "test"; then
-            npm test 2>&1 | tee -a pipeline.log
-          else
-            echo "No test script found in package.json" | tee -a pipeline.log
-          fi
+          exit 1
 
       # 7. Login to Docker Hub
 
